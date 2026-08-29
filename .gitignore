@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vitest-result.json
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+.DS_Store
