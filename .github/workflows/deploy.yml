@@ -1,0 +1,114 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: plan and apply
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: build the bundle the function runs
+        run: npm run build
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      # The state has to outlive any one run, so it lives in a bucket. The bucket is made here
+      # because nothing else can make it: it is what holds the record of everything else.
+      - name: make the state bucket if it is not there
+        id: state
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          bucket="transcript-tfstate-${account}-${AWS_REGION}"
+          if aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
+            echo "the state bucket is already there"
+          else
+            aws s3api create-bucket --bucket "$bucket" --region "$AWS_REGION" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
+            aws s3api put-bucket-versioning --bucket "$bucket" \
+              --versioning-configuration Status=Enabled
+            aws s3api put-public-access-block --bucket "$bucket" \
+              --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+            aws s3api put-bucket-encryption --bucket "$bucket" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+            echo "the state bucket was made"
+          fi
+          echo "bucket=$bucket" >> "$GITHUB_OUTPUT"
+
+      - name: init
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=${{ steps.state.outputs.bucket }}" \
+            -backend-config="region=${AWS_REGION}"
+        working-directory: infra
+
+      - name: plan
+        run: terraform plan -input=false -var="region=${AWS_REGION}" -out=tfplan
+        working-directory: infra
+
+      - name: apply
+        run: terraform apply -input=false -auto-approve tfplan
+        working-directory: infra
+
+      - name: say the address
+        run: |
+          set -euo pipefail
+          address="$(terraform output -raw address)"
+          example="$(terraform output -raw example)"
+          {
+            echo "## The page is serving"
+            echo ""
+            echo "Open it: $address"
+            echo ""
+            echo "One video: $example"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "address=$address"
+        working-directory: infra
+
+      # Green means the steps ran. It says nothing about whether the page works, so the page is
+      # opened and read before this run is called a success.
+      - name: read the page that is now serving
+        run: |
+          set -euo pipefail
+          address="$(terraform output -raw address)"
+          cd "$GITHUB_WORKSPACE"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            code=$(curl -s -o /tmp/page.html -w '%{http_code}' --max-time 90 "$address/videos?id=gyN9lV9QgyA" || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "attempt $attempt answered $code, the distribution may still be spreading"
+            sleep 30
+          done
+          test "$code" = "200"
+          bytes=$(wc -c < /tmp/page.html)
+          echo "the page answered $code with $bytes bytes"
+          test "$bytes" -gt 5000
+          grep -q "Transcript" /tmp/page.html
+          echo "the page carries text"
+        working-directory: infra

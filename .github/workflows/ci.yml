@@ -1,0 +1,69 @@
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  code:
+    name: code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
+      # This fails when the suite finds no tests. A run that executed nothing reports success just
+      # the same, so the count is read rather than the exit code alone.
+      - name: test
+        run: npm run test:count
+
+      - name: build
+        run: npm run build
+
+      # A build step that only compiles reports success on a package that cannot start, so the
+      # package is started here and asked for a page.
+      - name: start the package
+        run: |
+          set -euo pipefail
+          test -f dist/index.js
+          test -f dist/xhr-sync-worker.js
+          test -f dist/package.json
+          TABLE_NAME=unused npm run verify:package
+
+  infrastructure:
+    name: infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - name: format
+        run: terraform fmt -check -recursive
+        working-directory: infra
+
+      - name: validate
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd infra
+          terraform init -backend=false -input=false
+          terraform validate
