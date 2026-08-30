@@ -75,3 +75,15 @@ resource "aws_lambda_function_url" "handler" {
   function_name      = aws_lambda_function.handler.function_name
   authorization_type = "NONE"
 }
+
+# A public function url needs two grants on the function, not one. The provider adds
+# FunctionURLAllowPublicAccess for lambda:InvokeFunctionUrl by itself and stops there, so without
+# the grant below the url answers 403 to every caller on every path, and the distribution in front
+# of it answers 403 too. The grant carries no condition, which is what the other public function
+# urls in this account carry.
+resource "aws_lambda_permission" "public_invoke" {
+  statement_id  = "FunctionURLAllowPublicInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.handler.function_name
+  principal     = "*"
+}
