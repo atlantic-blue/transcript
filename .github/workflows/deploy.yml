@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  # The run asks GitHub for a short lived token and trades it for the deploy role. Without this the
+  # request for the token is refused and the whole job cannot reach the account at all.
+  id-token: write
 
 concurrency:
   group: deploy
@@ -17,12 +20,19 @@ jobs:
     name: plan and apply
     runs-on: ubuntu-latest
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
     steps:
       - uses: actions/checkout@v4
+
+      # The account is reached through a role this repository is trusted to assume, rather than
+      # through a key stored here. A key has to be rotated by a person and works from anywhere it
+      # leaks to; this credential lasts the length of the run and only this repository can ask for
+      # it. The role carries only the actions the infrastructure below needs.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - uses: actions/setup-node@v4
         with:
