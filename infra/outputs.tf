@@ -12,3 +12,8 @@ output "table_name" {
   description = "The table one item per video id is written to."
   value       = aws_dynamodb_table.transcripts.name
 }
+
+output "origin" {
+  description = "The function url the distribution reads from, to check the grant reaches it."
+  value       = aws_lambda_function_url.handler.function_url
+}

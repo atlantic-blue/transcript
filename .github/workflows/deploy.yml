@@ -102,6 +102,25 @@ jobs:
           echo "address=$address"
         working-directory: infra
 
+      # A public function url needs a grant for lambda:InvokeFunction as well as one for
+      # lambda:InvokeFunctionUrl, and without it every path answers 403 while the function itself
+      # still runs. The distribution can serve an answer it cached earlier, so the origin is asked
+      # directly here. Anything other than 200 fails the run.
+      - name: read the function url the distribution reads from
+        run: |
+          set -euo pipefail
+          origin="$(terraform output -raw origin)"
+          code=""
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /tmp/origin.html -w '%{http_code}' --max-time 90 "$origin" || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "attempt $attempt answered $code, the grant may still be settling"
+            sleep 10
+          done
+          echo "the function url answered $code"
+          test "$code" = "200"
+        working-directory: infra
+
       # Green means the steps ran. It says nothing about whether the page works, so the page is
       # opened and read before this run is called a success.
       - name: read the page that is now serving
