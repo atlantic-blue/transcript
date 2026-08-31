@@ -13,5 +13,5 @@
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "scripts", "vitest.config.ts", "vitest.live.config.ts"]
+  "include": ["src", "features", "scripts", "vitest.config.ts", "vitest.live.config.ts"]
 }
