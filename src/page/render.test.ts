@@ -145,6 +145,7 @@ describe("the pages for what went wrong", () => {
     const page = renderPage({
       kind: "upstream_failed",
       video_id: "gyN9lV9QgyA",
+      cause: "captions_refused",
       reason: "the caption endpoint returned an empty body",
     });
     expect(page.status).toBe(502);
@@ -156,7 +157,7 @@ describe("the pages for what went wrong", () => {
     for (const result of [
       { kind: "bad_id", given: "x" },
       { kind: "not_found", video_id: "aaaaaaaaaaa" },
-      { kind: "upstream_failed", video_id: "aaaaaaaaaaa", reason: "r" },
+      { kind: "upstream_failed", video_id: "aaaaaaaaaaa", cause: "bot_check", reason: "r" },
     ] satisfies LookupResult[]) {
       expect(renderPage(result).html).toContain('<form action="/videos"');
     }

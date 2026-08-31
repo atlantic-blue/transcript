@@ -1,5 +1,7 @@
-import { SCHEMA_VERSION, type Segment, type TranscriptItem } from "../contract.js";
+import { SCHEMA_VERSION, type Cause, type Segment, type TranscriptItem } from "../contract.js";
+import { observe, withoutSecrets } from "../observe.js";
 import { heldMinter, type Minter } from "./attestation.js";
+import { WHAT_HAPPENED, causeOf, readShape } from "./diagnosis.js";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -7,7 +9,17 @@ const USER_AGENT =
 export const SOURCE = "youtube.com timedtext, json3, with a proof of origin token bound to the video id";
 
 export class VideoNotFound extends Error {}
-export class PlatformRefused extends Error {}
+
+// The cause travels with the refusal, so the page the reader gets and the line in the log name the
+// same thing. It is not called cause, because Error already has a field by that name.
+export class PlatformRefused extends Error {
+  constructor(
+    readonly why: Cause,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 interface CaptionTrack {
   baseUrl: string;
@@ -17,6 +29,8 @@ interface CaptionTrack {
 }
 
 interface WatchPage {
+  status: number;
+  contentType: string;
   html: string;
   cookies: string;
 }
@@ -33,18 +47,24 @@ interface TimedTextEvent {
   segs?: { utf8?: string }[];
 }
 
+// A status that is not 200 is not thrown here. The body of a refusal is where the reason is
+// written, so it is read and classified like any other answer.
 async function readWatchPage(videoId: string, f: typeof fetch): Promise<WatchPage> {
   const response = await f(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: { "user-agent": USER_AGENT, "accept-language": "en-US,en;q=0.9" },
   });
-  if (!response.ok) throw new PlatformRefused(`the watch page answered ${response.status}`);
-  const html = await response.text();
+  const html = await response.text().catch(() => "");
   const cookies = response.headers
     .getSetCookie()
     .map((c) => c.split(";")[0] ?? "")
     .filter(Boolean)
     .join("; ");
-  return { html, cookies };
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? "",
+    html,
+    cookies,
+  };
 }
 
 export function readTitle(html: string): string | null {
@@ -102,6 +122,13 @@ export function eventsToSegments(events: TimedTextEvent[]): Segment[] {
   return segments;
 }
 
+function captionStatusCause(status: number): Cause {
+  if (status === 429) return "rate_limited";
+  if (status === 403) return "bot_check";
+  if (status >= 500) return "platform_error";
+  return "captions_refused";
+}
+
 export async function fetchTranscript(
   videoId: string,
   deps: { fetch?: typeof fetch; minter?: () => Promise<Minter> } = {},
@@ -109,12 +136,35 @@ export async function fetchTranscript(
   const f = deps.fetch ?? fetch;
   const getMinter = deps.minter ?? (() => heldMinter());
 
-  const { html, cookies } = await readWatchPage(videoId, f);
-  const title = readTitle(html);
-  if (title === null) throw new VideoNotFound(`no video with the id ${videoId}`);
+  const page = await readWatchPage(videoId, f);
+  const title = page.status === 200 ? readTitle(page.html) : null;
+
+  // The title is missing for several different reasons and they used to be indistinguishable. The
+  // shape of what came back is written here, once, whatever the reason turns out to be.
+  if (title === null) {
+    const shape = readShape(page.status, page.contentType, page.html);
+    const why = causeOf(shape);
+    observe("watch_page_unreadable", {
+      video_id: videoId,
+      cause: why,
+      what_happened: WHAT_HAPPENED[why],
+      ...shape,
+    });
+    if (why === "video_missing") throw new VideoNotFound(WHAT_HAPPENED[why]);
+    throw new PlatformRefused(why, WHAT_HAPPENED[why]);
+  }
 
   const now = new Date().toISOString();
-  const track = chooseTrack(readCaptionTracks(html));
+  const track = chooseTrack(readCaptionTracks(page.html));
+
+  observe("watch_page_read", {
+    video_id: videoId,
+    status: page.status,
+    bytes: page.html.length,
+    has_caption_tracks: track !== null,
+    track_kind: track?.kind ?? "",
+    language_code: track?.languageCode ?? "",
+  });
 
   if (!track) {
     return {
@@ -140,30 +190,49 @@ export async function fetchTranscript(
     headers: {
       "user-agent": USER_AGENT,
       "accept-language": "en-US,en;q=0.9",
-      cookie: cookies,
+      cookie: page.cookies,
       referer: `https://www.youtube.com/watch?v=${videoId}`,
       origin: "https://www.youtube.com",
     },
   });
-  if (!response.ok) throw new PlatformRefused(`the caption endpoint answered ${response.status}`);
+  const body = response.ok ? await response.text().catch(() => "") : "";
 
-  const body = await response.text();
+  // The address is signed and the request carried cookies and a token, so only the host and the
+  // path are written. The rest is a credential.
+  const refuse = (why: Cause): PlatformRefused => {
+    observe("captions_unreadable", {
+      video_id: videoId,
+      cause: why,
+      what_happened: WHAT_HAPPENED[why],
+      status: response.status,
+      content_type: response.headers.get("content-type") ?? "",
+      bytes: body.length,
+      address: withoutSecrets(url),
+    });
+    return new PlatformRefused(why, WHAT_HAPPENED[why]);
+  };
+
+  if (!response.ok) throw refuse(captionStatusCause(response.status));
   // An empty body with a 200 is how the platform refuses a caption request it does not trust.
-  if (body.length === 0) {
-    throw new PlatformRefused("the caption endpoint returned an empty body");
-  }
+  if (body.length === 0) throw refuse("captions_refused");
 
   let parsed: { events?: TimedTextEvent[] };
   try {
     parsed = JSON.parse(body) as { events?: TimedTextEvent[] };
   } catch {
-    throw new PlatformRefused("the caption endpoint returned something that is not json");
+    throw refuse("captions_not_json");
   }
 
   const segments = eventsToSegments(parsed.events ?? []);
-  if (segments.length === 0) {
-    throw new PlatformRefused("the caption endpoint returned no usable segments");
-  }
+  if (segments.length === 0) throw refuse("captions_empty");
+
+  observe("captions_read", {
+    video_id: videoId,
+    status: response.status,
+    bytes: body.length,
+    segments: segments.length,
+    characters: segments.reduce((n, segment) => n + segment.text.length, 0),
+  });
 
   return {
     video_id: videoId,

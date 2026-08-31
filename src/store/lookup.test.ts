@@ -77,12 +77,13 @@ describe("looking a video up", () => {
   it("says the platform refused, carrying the reason", async () => {
     const lookup = makeLookup(
       new MemoryStore(),
-      () => Promise.reject(new PlatformRefused("the caption endpoint returned an empty body")),
+      () => Promise.reject(new PlatformRefused("captions_refused", "an empty body")),
     );
     expect(await lookup("gyN9lV9QgyA")).toEqual({
       kind: "upstream_failed",
       video_id: "gyN9lV9QgyA",
-      reason: "the caption endpoint returned an empty body",
+      cause: "captions_refused",
+      reason: "an empty body",
     });
   });
 
@@ -91,6 +92,7 @@ describe("looking a video up", () => {
     expect(await lookup("gyN9lV9QgyA")).toEqual({
       kind: "upstream_failed",
       video_id: "gyN9lV9QgyA",
+      cause: "platform_error",
       reason: "socket closed",
     });
   });
@@ -99,7 +101,7 @@ describe("looking a video up", () => {
     const store = new MemoryStore();
     const fetcher = vi
       .fn()
-      .mockRejectedValueOnce(new PlatformRefused("refused"))
+      .mockRejectedValueOnce(new PlatformRefused("bot_check", "refused"))
       .mockResolvedValueOnce(item());
     const lookup = makeLookup(store, fetcher);
 

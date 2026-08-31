@@ -18,16 +18,29 @@ const watchPage = (title: string, withTracks = true) =>
   (withTracks ? `,${TRACK_JSON}` : "") +
   `};</script></html>`;
 
+// What the platform really sends when there is no video: a watch page carrying a player response
+// that says so. A bare page with the words on it is not what a missing video looks like.
+const missingVideoPage =
+  `<html><title>YouTube</title><script>var x = {"playabilityStatus":{"status":"ERROR","reason":"Video unavailable"}};</script></html>`;
+
+const botCheckPage =
+  `<html><title>YouTube</title><script>var x = {"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm you are not a bot"}};</script></html>`;
+
 const minter = { mint: async () => "a-token", expiresAt: Date.now() + 60_000 };
 const getMinter = async () => minter;
 
-const responseOf = (body: string, status = 200, cookies: string[] = []) =>
-  ({
+// Real headers rather than an object with the one method the code happens to call. A double that
+// answers less than the real thing turns a missing call into a green test.
+const responseOf = (body: string, status = 200, cookies: string[] = [], contentType = "text/html") => {
+  const headers = new Headers({ "content-type": contentType });
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+  return {
     ok: status >= 200 && status < 300,
     status,
     text: async () => body,
-    headers: { getSetCookie: () => cookies },
-  }) as unknown as Response;
+    headers,
+  } as unknown as Response;
+};
 
 const captionBody = JSON.stringify({
   events: [
@@ -174,11 +187,37 @@ describe("fetching a transcript", () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 
-  it("says the video does not exist when the watch page carries no video", async () => {
-    const f = vi.fn().mockResolvedValueOnce(responseOf("<html>Video unavailable</html>"));
+  it("says the video does not exist when the platform says the video is unplayable", async () => {
+    const f = vi.fn().mockResolvedValueOnce(responseOf(missingVideoPage));
     await expect(
       fetchTranscript("aaaaaaaaaaa", { fetch: f as unknown as typeof fetch, minter: getMinter }),
     ).rejects.toBeInstanceOf(VideoNotFound);
+  });
+
+  // This is the defect the page was built on. A page the code does not recognise carries no video
+  // and names no reason, which is exactly what a refusal looks like, so calling it a missing video
+  // told the reader a working video had been deleted.
+  it("does not call a page it cannot recognise a missing video", async () => {
+    const f = vi.fn().mockResolvedValueOnce(responseOf("<html>something else entirely</html>"));
+    const failure = await fetchTranscript("gyN9lV9QgyA", {
+      fetch: f as unknown as typeof fetch,
+      minter: getMinter,
+    }).catch((thrown: unknown) => thrown);
+
+    expect(failure).toBeInstanceOf(PlatformRefused);
+    expect(failure).not.toBeInstanceOf(VideoNotFound);
+    expect((failure as PlatformRefused).why).toBe("unrecognised_page");
+  });
+
+  it("says the platform refused, not that the video is missing, when it asks for proof of a person", async () => {
+    const f = vi.fn().mockResolvedValueOnce(responseOf(botCheckPage));
+    const failure = await fetchTranscript("gyN9lV9QgyA", {
+      fetch: f as unknown as typeof fetch,
+      minter: getMinter,
+    }).catch((thrown: unknown) => thrown);
+
+    expect(failure).toBeInstanceOf(PlatformRefused);
+    expect((failure as PlatformRefused).why).toBe("bot_check");
   });
 
   it("says the platform refused when the caption body comes back empty", async () => {
@@ -205,7 +244,7 @@ describe("fetching a transcript", () => {
       .mockResolvedValueOnce(responseOf("<html>no</html>"));
     await expect(
       fetchTranscript("gyN9lV9QgyA", { fetch: f as unknown as typeof fetch, minter: getMinter }),
-    ).rejects.toThrow(/not json/);
+    ).rejects.toThrow(/is not json/);
   });
 
   it("says the platform refused when every event is empty", async () => {
@@ -215,6 +254,6 @@ describe("fetching a transcript", () => {
       .mockResolvedValueOnce(responseOf(JSON.stringify({ events: [{ tStartMs: 0, segs: [{ utf8: " " }] }] })));
     await expect(
       fetchTranscript("gyN9lV9QgyA", { fetch: f as unknown as typeof fetch, minter: getMinter }),
-    ).rejects.toThrow(/no usable segments/);
+    ).rejects.toThrow(/no usable line/);
   });
 });
