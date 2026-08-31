@@ -41,6 +41,47 @@ it is correct for the player, and for captions it returns zero bytes.
 The integrity token behind the mint lasts twelve hours, so a warm function attests once and mints per
 video after that.
 
+## What the deployed function actually gets
+
+Captured from the deployed function on 31 August 2026, in eu-west-1, on the `watch_page_unreadable`
+line of its own log:
+
+    {"event":"watch_page_unreadable","video_id":"gyN9lV9QgyA","cause":"bot_check",
+     "status":200,"bytes":1412860,"has_video_details":true,"has_caption_tracks":false,
+     "has_player_response":true,"playability":"LOGIN_REQUIRED",
+     "playability_reason":"Sign in to confirm you are not a bot"}
+
+The platform serves the function a full watch page, HTTP 200, over a megabyte, and that page carries
+no caption track and a player response that asks the caller to prove it is a person. The same
+request from a laptop returns the video and 560 caption segments. The block is on the address the
+function calls from, and it lands on the watch page, before the proof of origin work above is
+reached.
+
+Reading it needed the boundary to say so. Before this, the title came back null and every cause threw
+the same error, so a refusal, a rate limit and a deleted video all reached the reader as one 404
+saying "No video with that id".
+
+## What a read can fail with
+
+Each cause gets its own page, its own status and its own line in the log, and only one of them is a
+404:
+
+    video_missing      404  the platform says the video is unplayable
+    bot_check          502  the platform wants proof the caller is a person
+    consent_wall       502  a consent page came back instead of the video
+    rate_limited       429  too many requests, and the answer carries retry-after
+    platform_error     502  a status that is not a page
+    unrecognised_page  502  a page with no video and no reason given
+    captions_refused   502  the video was found, the caption text was refused
+    captions_not_json  502  the caption endpoint answered with something else
+    captions_empty     502  the track holds no readable line
+
+A missing video is proved, never assumed. Anything the code cannot recognise is a refusal, because
+calling an unrecognised page a missing video is what told readers a working video was deleted.
+
+Nothing written to the log is a credential. The caption address is signed and the request carries
+cookies and a minted token, so an address is cut to its host and path before it is written.
+
 ## The gates
 
     npm ci
