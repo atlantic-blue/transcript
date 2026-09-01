@@ -123,6 +123,18 @@ decision, not a task to build.
 
 ## The run this report started
 
-This file ships in its own pull request, cut from `origin/main` at `3b5f6cc`. Each push to that
-branch starts a `gates` run. The address of the run my push started is written at the end of this
-file once the push landed.
+This file ships in its own pull request, cut from `origin/main` at `3b5f6cc`:
+
+https://github.com/atlantic-blue/transcript/pull/10
+
+The push to that branch started this run, and it passed:
+
+https://github.com/atlantic-blue/transcript/actions/runs/33483614508
+
+I read the log rather than the colour. The `code` job installed 246 packages, printed
+"tests: 75 total, 75 passed, 0 failed", built a 7.13 MB bundle and printed "the package starts and
+serves". The `infrastructure` job checked the format and validated the configuration. Both jobs
+report success, and both check runs on the head commit report success.
+
+The push to pull request 4 itself started no run, because the merge moved nothing and the `deploy`
+workflow does not start on a pull request.
