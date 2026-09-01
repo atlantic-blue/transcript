@@ -100,7 +100,8 @@ The push to `diagnose-the-boundary-and-report-the-real-cause` moved nothing, so 
 The two checks on the head commit `84d9fe3` are `code` and `infrastructure`. Both pass. I ran the
 same gates locally, and they pass here too.
 
-This file ships in its own pull request, off the latest `origin/main`. That push started this run:
+This file ships in its own pull request, off the latest `origin/main`. Each push to that branch
+starts a `gates` run, and every one of them passed. The first push started this run:
 
     https://github.com/atlantic-blue/transcript/actions/runs/33481941853
 
@@ -108,6 +109,9 @@ It passed. The `code` job ran 75 tests, built the bundle and started the package
 `infrastructure` job checked the format and validated the configuration. Both are green, and I read
 the log rather than the colour: the run installed 246 packages and printed
 "tests: 75 total, 75 passed, 0 failed".
+
+The push after it, which added the address above, started
+https://github.com/atlantic-blue/transcript/actions/runs/33482027137, and it passed the same way.
 
 The pull request that carries this file is https://github.com/atlantic-blue/transcript/pull/8
 
