@@ -145,5 +145,16 @@ decision, not a task to build.
 The push to pull request 4 started no run. The merge moved nothing, and the `deploy` workflow does
 not start on a pull request.
 
-This file ships in its own pull request, cut from `origin/main` at `3b5f6cc`. The run its push
-started is named in that pull request.
+This file ships in its own pull request, cut from `origin/main` at `3b5f6cc`:
+
+https://github.com/atlantic-blue/transcript/pull/12
+
+The push to that branch started this run, and it passed:
+
+https://github.com/atlantic-blue/transcript/actions/runs/33484742957
+
+I read the log, not the colour. The `code` job printed "tests: 75 total, 75 passed, 0 failed", it
+built a 7.13 MB bundle, and it printed "the package starts and serves". The count is 75 because this
+branch comes from `main`. The 114 tests are on the branch of pull request 4. The `infrastructure`
+job checked the format and validated the configuration. Both check runs on the head commit report
+success. GitHub reports the head commit as verified.
