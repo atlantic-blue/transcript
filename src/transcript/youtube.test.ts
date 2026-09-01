@@ -257,3 +257,79 @@ describe("fetching a transcript", () => {
     ).rejects.toThrow(/no usable line/);
   });
 });
+
+// The watch page is refused at a datacentre address and readable elsewhere, which is what stopped
+// the deployed function. A refusal is now a question asked again, not an answer to the reader.
+describe("when the watch page is refused, the player endpoint is asked", () => {
+  const playerAnswer = {
+      "playabilityStatus": {
+          "status": "OK"
+      },
+      "videoDetails": {
+          "title": "A title the player knows"
+      },
+      "captions": {
+          "playerCaptionsTracklistRenderer": {
+              "captionTracks": [
+                  {
+                      "baseUrl": "https://www.youtube.com/api/timedtext?v=x&signature=1",
+                      "name": {
+                          "simpleText": "English (auto-generated)"
+                      },
+                      "languageCode": "en",
+                      "kind": "asr"
+                  }
+              ]
+          }
+      }
+  };
+
+  const jsonOf = (body: unknown, status = 200) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+      headers: new Headers({ "content-type": "application/json" }),
+    }) as unknown as Response;
+
+  it("returns the transcript the player found instead of the refusal", async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(responseOf(botCheckPage))
+      .mockResolvedValueOnce(jsonOf(playerAnswer))
+      .mockResolvedValueOnce(responseOf(captionBody, 200, [], "application/json"));
+
+    const item = await fetchTranscript("gyN9lV9QgyA", { fetch: f as unknown as typeof fetch, minter: getMinter });
+
+    expect(item.has_captions).toBe(true);
+    expect(item.title).toBe("A title the player knows");
+    expect(item.text).toBe("first line second line");
+    expect(item.source).toContain("ios client");
+  });
+
+  it("still refuses when the player endpoint has nothing to add", async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(responseOf(botCheckPage))
+      .mockResolvedValueOnce(jsonOf({ playabilityStatus: { status: "LOGIN_REQUIRED" } }));
+
+    const failure = await fetchTranscript("gyN9lV9QgyA", {
+      fetch: f as unknown as typeof fetch,
+      minter: getMinter,
+    }).catch((thrown: unknown) => thrown);
+
+    expect(failure).toBeInstanceOf(PlatformRefused);
+    expect((failure as PlatformRefused).why).toBe("bot_check");
+  });
+
+  // A missing video is proved from the watch page, so there is nothing to ask again about.
+  it("does not ask the player when the platform proved the video is missing", async () => {
+    const f = vi.fn().mockResolvedValueOnce(responseOf(missingVideoPage));
+
+    await expect(
+      fetchTranscript("aaaaaaaaaaa", { fetch: f as unknown as typeof fetch, minter: getMinter }),
+    ).rejects.toBeInstanceOf(VideoNotFound);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+});

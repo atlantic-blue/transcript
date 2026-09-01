@@ -1,7 +1,12 @@
-import { SCHEMA_VERSION, type Cause, type Segment, type TranscriptItem } from "../contract.js";
+import { SCHEMA_VERSION, type Cause, type TranscriptItem } from "../contract.js";
 import { observe, withoutSecrets } from "../observe.js";
 import { heldMinter, type Minter } from "./attestation.js";
 import { WHAT_HAPPENED, causeOf, readShape } from "./diagnosis.js";
+import { PLAYER_SOURCE, type PlayerRead, readThroughPlayer } from "./innertube.js";
+import { type CaptionTrack, type TimedTextEvent, chooseTrack, eventsToSegments, trackName } from "./timedtext.js";
+
+export { chooseTrack, eventsToSegments, trackName };
+export type { CaptionTrack, TimedTextEvent };
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -21,13 +26,6 @@ export class PlatformRefused extends Error {
   }
 }
 
-interface CaptionTrack {
-  baseUrl: string;
-  languageCode?: string;
-  kind?: string;
-  name?: { simpleText?: string; runs?: { text: string }[] };
-}
-
 interface WatchPage {
   status: number;
   contentType: string;
@@ -39,12 +37,6 @@ export interface Fetched {
   title: string;
   track: CaptionTrack | null;
   events: TimedTextEvent[];
-}
-
-interface TimedTextEvent {
-  tStartMs?: number;
-  dDurationMs?: number;
-  segs?: { utf8?: string }[];
 }
 
 // A status that is not 200 is not thrown here. The body of a refusal is where the reason is
@@ -88,45 +80,28 @@ export function readCaptionTracks(html: string): CaptionTrack[] {
   }
 }
 
-// A track a person wrote is preferred over one a machine generated, and English over anything else.
-export function chooseTrack(tracks: CaptionTrack[]): CaptionTrack | null {
-  if (tracks.length === 0) return null;
-  const score = (t: CaptionTrack): number => {
-    let n = 0;
-    if (t.kind !== "asr") n += 2;
-    if ((t.languageCode ?? "").startsWith("en")) n += 1;
-    return n;
-  };
-  return [...tracks].sort((a, b) => score(b) - score(a))[0] ?? null;
-}
-
-export function trackName(track: CaptionTrack): string {
-  return track.name?.simpleText ?? track.name?.runs?.[0]?.text ?? "";
-}
-
-export function eventsToSegments(events: TimedTextEvent[]): Segment[] {
-  const segments: Segment[] = [];
-  for (const event of events) {
-    const text = (event.segs ?? [])
-      .map((s) => s.utf8 ?? "")
-      .join("")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!text) continue;
-    segments.push({
-      start_seconds: Math.round((event.tStartMs ?? 0) / 10) / 100,
-      duration_seconds: Math.round((event.dDurationMs ?? 0) / 10) / 100,
-      text,
-    });
-  }
-  return segments;
-}
-
 function captionStatusCause(status: number): Cause {
   if (status === 429) return "rate_limited";
   if (status === 403) return "bot_check";
   if (status >= 500) return "platform_error";
   return "captions_refused";
+}
+
+function itemFromPlayer(videoId: string, read: PlayerRead): TranscriptItem {
+  const track = read.track;
+  return {
+    video_id: videoId,
+    schema_version: SCHEMA_VERSION,
+    fetched_at: new Date().toISOString(),
+    title: read.title,
+    has_captions: track !== null,
+    language_code: track?.languageCode ?? "",
+    track_kind: track === null ? "" : track.kind === "asr" ? "asr" : "standard",
+    track_name: track === null ? "" : trackName(track),
+    segments: read.segments,
+    text: read.segments.map((s) => s.text).join(" "),
+    source: PLAYER_SOURCE,
+  };
 }
 
 export async function fetchTranscript(
@@ -151,6 +126,14 @@ export async function fetchTranscript(
       ...shape,
     });
     if (why === "video_missing") throw new VideoNotFound(WHAT_HAPPENED[why]);
+
+    // The watch page is readable from some addresses and refused at others, so a refusal here is
+    // not the end of the question. The player endpoint is asked before the reader is told no, and
+    // it answers where the watch page will not. A missing video is already proved above, so this
+    // asks only about a refusal.
+    const read = await readThroughPlayer(videoId, f);
+    if (read) return itemFromPlayer(videoId, read);
+
     throw new PlatformRefused(why, WHAT_HAPPENED[why]);
   }
 
