@@ -191,3 +191,19 @@ not start on a pull request. No new check run exists on `84d9fe37`, so `plan and
 still the failure from 31 August.
 
 This file ships in its own pull request, cut fresh from `origin/main` at `3b5f6cc`.
+
+The push that opened it started this run, and it passed:
+
+https://github.com/atlantic-blue/transcript/actions/runs/33487276698
+
+I read the log, not the colour. The `code` job printed "tests: 75 total, 75 passed, 0 failed". It
+built a 7.13 MB bundle and a 1641 byte worker. It started the package, answered `GET /` with 200 and
+4697 bytes, and printed "the package starts and serves". The count is 75 because this branch comes
+from `main`. The 114 tests are on the branch of pull request 4. The `infrastructure` job checked the
+format, initialised without a backend, and printed "Success! The configuration is valid."
+
+GitHub reports the commit on this pull request as verified.
+
+## The pull request that carries this report
+
+https://github.com/atlantic-blue/transcript/pull/16
