@@ -61,6 +61,38 @@ Reading it needed the boundary to say so. Before this, the title came back null 
 the same error, so a refusal, a rate limit and a deleted video all reached the reader as one 404
 saying "No video with that id".
 
+## What gets the text when the watch page is refused
+
+The refusal above lands on the watch page, so no caption address is ever read and the proof of origin
+work is never reached. Asking the same question a different way answers it. This request works, and
+it carries no token at all:
+
+    POST https://www.youtube.com/youtubei/v1/player?prettyPrint=false
+    content-type: application/json
+    user-agent: com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_0 like Mac OS X)
+    x-youtube-client-name: 5
+    x-youtube-client-version: 20.10.4
+
+    {"videoId":"gyN9lV9QgyA","context":{"client":{"clientName":"IOS","clientVersion":"20.10.4",
+     "deviceMake":"Apple","deviceModel":"iPhone16,2","hl":"en","gl":"US"}},
+     "contentCheckOk":true,"racyCheckOk":true}
+
+It answers with the title and a caption track. That track's address with `&fmt=json3` added returns
+406,491 bytes of json3, which is 560 segments and 19,420 characters on `gyN9lV9QgyA`. That is the
+same count the watch page path produces.
+
+Measured on 1 September 2026. Three readings behind it:
+
+- The caption address from the watch page returns HTTP 200 and zero bytes without a minted token,
+  from an address the platform does not refuse at all. The token is what that path needs.
+- The caption address from the player endpoint needs no token. Plain, it returns 406,491 bytes.
+- The `ANDROID` client answers too, but ignores `fmt=json3` and returns XML, so `IOS` is the one used.
+
+The watch page is still read first, because it is the path that tells a video with no captions apart
+from a video that is missing. The player endpoint is asked only after a refusal, and a proved missing
+video never reaches it. When the player endpoint has nothing to add, the refusal the watch page named
+is what the reader gets, unchanged.
+
 ## What a read can fail with
 
 Each cause gets its own page, its own status and its own line in the log, and only one of them is a
