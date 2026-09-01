@@ -102,7 +102,14 @@ same gates locally, and they pass here too.
 
 This file ships in its own pull request, off the latest `origin/main`. That push started this run:
 
-    RUN_ADDRESS
+    https://github.com/atlantic-blue/transcript/actions/runs/33481941853
+
+It passed. The `code` job ran 75 tests, built the bundle and started the package. The
+`infrastructure` job checked the format and validated the configuration. Both are green, and I read
+the log rather than the colour: the run installed 246 packages and printed
+"tests: 75 total, 75 passed, 0 failed".
+
+The pull request that carries this file is https://github.com/atlantic-blue/transcript/pull/8
 
 ## What a person decides next
 
