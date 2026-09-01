@@ -160,3 +160,12 @@ The push to pull request 4 started no run. The merge moved nothing, and the `dep
 not start on a pull request.
 
 This file ships in its own pull request, cut from `origin/main` at `3b5f6cc`.
+
+The push that opened it started this run, and it passed:
+
+https://github.com/atlantic-blue/transcript/actions/runs/33485887355
+
+I read the log, not the colour. The `code` job printed "tests: 75 total, 75 passed, 0 failed". It
+built a 7.13 MB bundle. It started the package and printed "the package starts and serves". The
+count is 75 because this branch comes from `main`. The 114 tests are on the branch of pull request
+4. The `infrastructure` job checked the format and validated the configuration.
