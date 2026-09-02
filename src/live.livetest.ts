@@ -41,3 +41,32 @@ describe("against the real platform", () => {
     expect(first?.segments.length).toBeGreaterThan(100);
   });
 });
+
+// What the deployed function is served at a datacentre address: a watch page carrying the bot
+// check. Nothing else is faked, so the player endpoint and the caption address are the real ones.
+// This is the check that the deploy gate was failing on.
+describe("against the real platform, with the watch page refused", () => {
+  const BOT_CHECK =
+    `<html><title>YouTube</title><script>var x = {"playabilityStatus":{"status":"LOGIN_REQUIRED",` +
+    `"reason":"Sign in to confirm you are not a bot"}};</script></html>`;
+
+  it("still reaches the text through the player endpoint", { timeout: 120_000 }, async () => {
+    const real = globalThis.fetch;
+    const refused = (async (url: string | URL | Request, options?: RequestInit) => {
+      if (String(url).includes("/watch?v=")) {
+        return new Response(BOT_CHECK, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+      }
+      return real(url, options);
+    }) as unknown as typeof fetch;
+
+    const item = await fetchTranscript("gyN9lV9QgyA", { fetch: refused });
+
+    console.log(
+      `refused watch page  captions=${item.has_captions}  segments=${item.segments.length}` +
+        `  chars=${item.text.length}  source=${item.source}`,
+    );
+    expect(item.has_captions).toBe(true);
+    expect(item.segments.length).toBeGreaterThan(100);
+    expect(item.title.length).toBeGreaterThan(0);
+  });
+});

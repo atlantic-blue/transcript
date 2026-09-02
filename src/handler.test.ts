@@ -83,7 +83,7 @@ describe("what the edge is told to hold", () => {
   });
 
   it("never holds a failure, so the next visit reaches the platform", () => {
-    expect(cacheControlFor({ kind: "upstream_failed", video_id: "x", reason: "r" })).toBe("no-store");
+    expect(cacheControlFor({ kind: "upstream_failed", video_id: "x", cause: "bot_check", reason: "r" })).toBe("no-store");
   });
 });
 

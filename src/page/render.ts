@@ -1,4 +1,4 @@
-import type { LookupResult, TranscriptItem } from "../contract.js";
+import type { Cause, LookupResult, TranscriptItem } from "../contract.js";
 import { escapeHtml } from "./escape.js";
 import { STYLE } from "./style.js";
 
@@ -124,6 +124,111 @@ ${body}
   };
 }
 
+
+// One page per cause. A refusal is not a missing video, so none of these answers 404, and none of
+// them tells the reader to try again when trying again cannot work.
+//
+// Every refusal offers the video on the platform itself, because that is the way onward that does
+// work while this page cannot read it.
+interface Refusal {
+  status: number;
+  title: string;
+  lines: (videoId: string) => string[];
+}
+
+function watchLink(videoId: string): string {
+  const id = escapeHtml(videoId);
+  return `You can watch it on the platform:
+     <a href="https://www.youtube.com/watch?v=${id}">youtube.com/watch?v=${id}</a>.`;
+}
+
+export const REFUSALS: Record<Cause, Refusal> = {
+  // The reader did nothing wrong and cannot fix this, so the page says who has to.
+  bot_check: {
+    status: 502,
+    title: "The platform refused this page, not your video",
+    lines: (videoId) => [
+      `The platform asked this page to prove that it is a person. This page is a server, so it
+       cannot.`,
+      `Your id is right and the video is fine. ${watchLink(videoId)}`,
+      `Trying again will not help. The platform refuses the address this page reads from, and a
+       person has to change how this page reaches the platform.`,
+    ],
+  },
+  consent_wall: {
+    status: 502,
+    title: "The platform asked for consent instead of sending the video",
+    lines: (videoId) => [
+      `The platform answered with a consent page. It did not send the video.`,
+      `Your id is right. ${watchLink(videoId)}`,
+      `Trying again is unlikely to help until a person changes how this page asks.`,
+    ],
+  },
+  rate_limited: {
+    status: 429,
+    title: "The platform is refusing this page for asking too often",
+    lines: (videoId) => [
+      `The platform limits how often this page can ask it for a video. That limit is reached.`,
+      `Nothing was stored. Wait a minute, then try again. ${watchLink(videoId)}`,
+    ],
+  },
+  platform_error: {
+    status: 502,
+    title: "The platform did not answer",
+    lines: (videoId) => [
+      `The platform answered with an error. The fault is at the platform, not in the id you gave.`,
+      `Nothing was stored. Wait a minute, then try again. ${watchLink(videoId)}`,
+    ],
+  },
+  unrecognised_page: {
+    status: 502,
+    title: "The platform sent something this page cannot read",
+    lines: (videoId) => [
+      `The platform answered with a page that carries no video, and it gave no reason.`,
+      `The video may be fine. ${watchLink(videoId)}`,
+      `Nothing was stored. Trying again is worth doing.`,
+    ],
+  },
+  captions_refused: {
+    status: 502,
+    title: "The platform refused the caption text",
+    lines: (videoId) => [
+      `This page found the video and found its caption track. The platform then refused to send the
+       text of those captions.`,
+      `Your id is right and the video is fine. ${watchLink(videoId)}`,
+      `Nothing was stored. Trying again is worth doing.`,
+    ],
+  },
+  captions_not_json: {
+    status: 502,
+    title: "The platform refused the caption text",
+    lines: (videoId) => [
+      `This page found the video and asked for its captions. The platform answered with something
+       that is not caption text.`,
+      `Your id is right and the video is fine. ${watchLink(videoId)}`,
+      `Nothing was stored. Trying again is worth doing.`,
+    ],
+  },
+  captions_empty: {
+    status: 502,
+    title: "The caption track carries no text",
+    lines: (videoId) => [
+      `This page found a caption track for this video, but the track holds no readable line.`,
+      `${watchLink(videoId)}`,
+      `Nothing was stored. Trying again is worth doing.`,
+    ],
+  },
+  // A missing video never reaches this map. It is a 404 and it is rendered as one.
+  video_missing: {
+    status: 404,
+    title: "No video with that id",
+    lines: (videoId) => [
+      `The platform holds no video under <code>${escapeHtml(videoId)}</code>.`,
+      `The video may be private, it may be deleted, or the id may have one character wrong.`,
+    ],
+  },
+};
+
 export function renderPage(result: LookupResult): Rendered {
   switch (result.kind) {
     case "ok":
@@ -135,18 +240,14 @@ export function renderPage(result: LookupResult): Rendered {
         `Take the id from the address of the video. In
          <code>youtube.com/watch?v=gyN9lV9QgyA</code> the id is the part after <code>v=</code>.`,
       ]);
-    case "not_found":
-      return problemPage(404, "No video with that id", [
-        `The id <code>${escapeHtml(result.video_id)}</code> has the right shape, but the platform
-         holds no video under it.`,
-        `The video may be private, it may be deleted, or the id may have one character wrong.`,
-      ]);
-    case "upstream_failed":
-      return problemPage(502, "The platform did not answer", [
-        `The text of <code>${escapeHtml(result.video_id)}</code> could not be read just now.`,
-        `Nothing was stored, so trying again in a minute is worth doing.`,
-        `What went wrong: ${escapeHtml(result.reason)}.`,
-      ]);
+    case "not_found": {
+      const missing = REFUSALS.video_missing;
+      return problemPage(missing.status, missing.title, missing.lines(result.video_id));
+    }
+    case "upstream_failed": {
+      const refusal = REFUSALS[result.cause];
+      return problemPage(refusal.status, refusal.title, refusal.lines(result.video_id));
+    }
   }
 }
 

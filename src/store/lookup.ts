@@ -1,4 +1,5 @@
 import { isVideoId, type LookupResult, type TranscriptItem } from "../contract.js";
+import { observe } from "../observe.js";
 import { PlatformRefused, VideoNotFound } from "../transcript/youtube.js";
 import type { Store } from "./store.js";
 
@@ -23,10 +24,13 @@ export function makeLookup(
     } catch (cause) {
       if (cause instanceof VideoNotFound) return { kind: "not_found", video_id: given };
       if (cause instanceof PlatformRefused) {
-        return { kind: "upstream_failed", video_id: given, reason: cause.message };
+        return { kind: "upstream_failed", video_id: given, cause: cause.why, reason: cause.message };
       }
+      // Anything else is the attestation or the network giving way, which is the platform not
+      // answering rather than the video being absent.
       const reason = cause instanceof Error ? cause.message : "the fetch failed";
-      return { kind: "upstream_failed", video_id: given, reason };
+      observe("fetch_threw", { video_id: given, reason });
+      return { kind: "upstream_failed", video_id: given, cause: "platform_error", reason };
     }
 
     await store.put(item);

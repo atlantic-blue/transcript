@@ -121,22 +121,45 @@ jobs:
           test "$code" = "200"
         working-directory: infra
 
-      # Green means the steps ran. It says nothing about whether the page works, so the page is
-      # opened and read before this run is called a success.
-      - name: read the page that is now serving
+      # The deploy serving at all is a different question from the product working, so they are
+      # asked separately. This one only proves the distribution reaches the function.
+      - name: read the front page
         run: |
           set -euo pipefail
           address="$(terraform output -raw address)"
-          cd "$GITHUB_WORKSPACE"
+          code=$(curl -s -o /tmp/front.html -w '%{http_code}' --max-time 90 "$address/" || true)
+          echo "the front page answered $code with $(wc -c < /tmp/front.html) bytes"
+          test "$code" = "200"
+          grep -q "Read a video as text" /tmp/front.html
+        working-directory: infra
+
+      # Green means the steps ran. It says nothing about whether a reader gets a transcript, so one
+      # is asked for here. A failure names what the platform did rather than the status alone,
+      # because a bare 404 told nobody anything for a day. The page states the cause in its title.
+      - name: read a transcript from the page that is now serving
+        run: |
+          set -euo pipefail
+          address="$(terraform output -raw address)"
           for attempt in 1 2 3 4 5 6 7 8; do
             code=$(curl -s -o /tmp/page.html -w '%{http_code}' --max-time 90 "$address/videos?id=gyN9lV9QgyA" || true)
             if [ "$code" = "200" ]; then break; fi
             echo "attempt $attempt answered $code, the distribution may still be spreading"
             sleep 30
           done
-          test "$code" = "200"
           bytes=$(wc -c < /tmp/page.html)
-          echo "the page answered $code with $bytes bytes"
+          said=$(sed -n "s/.*<title>\\(.*\\)<\\/title>.*/\\1/p" /tmp/page.html | head -1)
+          echo "the page answered $code with $bytes bytes, and said: $said"
+          if [ "$code" != "200" ]; then
+            {
+              echo "## The page is serving, and it cannot read a transcript"
+              echo ""
+              echo "It answered $code and said: $said"
+              echo ""
+              echo "The cause is in the function log, on the watch_page_unreadable line."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::the page answered $code and said: $said"
+            exit 1
+          fi
           test "$bytes" -gt 5000
           grep -q "Transcript" /tmp/page.html
           echo "the page carries text"

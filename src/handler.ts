@@ -32,10 +32,19 @@ export function cacheControlFor(result: LookupResult | null): string {
   }
 }
 
-function answer(page: Rendered, cacheControl: string): HttpAnswer {
+// A rate limit is the one refusal that says when to come back, so the answer says it too.
+export function retryAfterFor(result: LookupResult): Record<string, string> {
+  if (result.kind === "upstream_failed" && result.cause === "rate_limited") {
+    return { "retry-after": "60" };
+  }
+  return {};
+}
+
+function answer(page: Rendered, cacheControl: string, extra: Record<string, string> = {}): HttpAnswer {
   return {
     statusCode: page.status,
     headers: {
+      ...extra,
       "content-type": "text/html; charset=utf-8",
       "cache-control": cacheControl,
       "x-content-type-options": "nosniff",
@@ -61,7 +70,7 @@ export async function route(event: FunctionUrlEvent, lookup: Lookup): Promise<Ht
   if (path === "/videos" || path === "/videos/") {
     const given = event.queryStringParameters?.id ?? "";
     const result = await lookup(given);
-    return answer(renderPage(result), cacheControlFor(result));
+    return answer(renderPage(result), cacheControlFor(result), retryAfterFor(result));
   }
 
   return answer(renderUnknownRoute(), cacheControlFor(null));

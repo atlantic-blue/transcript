@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, type LookupResult, type TranscriptItem } from "../contract.js";
+import { SCHEMA_VERSION, type Cause, type LookupResult, type TranscriptItem } from "../contract.js";
 import { escapeHtml } from "./escape.js";
-import { paragraphsOf, renderIndex, renderPage, renderUnknownRoute } from "./render.js";
+import { REFUSALS, paragraphsOf, renderIndex, renderPage, renderUnknownRoute } from "./render.js";
 
 const item = (over: Partial<TranscriptItem> = {}): TranscriptItem => ({
   video_id: "gyN9lV9QgyA",
@@ -141,22 +141,37 @@ describe("the pages for what went wrong", () => {
     expect(page.html).toContain("aaaaaaaaaaa");
   });
 
-  it("answers 502 when the platform refused, and carries the reason", () => {
+  it("answers 502 when the platform refused, and says which refusal it was", () => {
     const page = renderPage({
       kind: "upstream_failed",
       video_id: "gyN9lV9QgyA",
-      reason: "the caption endpoint returned an empty body",
+      cause: "captions_refused",
+      reason: "an empty body",
     });
     expect(page.status).toBe(502);
-    expect(page.html).toContain("The platform did not answer");
-    expect(page.html).toContain("the caption endpoint returned an empty body");
+    expect(page.html).toContain("The platform refused the caption text");
+  });
+
+  // A refusal that answered 404 is the defect this page was built on. Nothing in this map may.
+  it("answers 404 for a missing video and for nothing else", () => {
+    for (const [cause, refusal] of Object.entries(REFUSALS)) {
+      expect(refusal.status === 404).toBe(cause === "video_missing");
+    }
+  });
+
+  it("gives every cause its own page, and never leaves one unrendered", () => {
+    for (const cause of Object.keys(REFUSALS) as Cause[]) {
+      const page = renderPage({ kind: "upstream_failed", video_id: "gyN9lV9QgyA", cause, reason: "r" });
+      expect(page.html).toContain(REFUSALS[cause].title);
+      expect(page.status).toBeGreaterThanOrEqual(400);
+    }
   });
 
   it("offers a way onward from every problem page", () => {
     for (const result of [
       { kind: "bad_id", given: "x" },
       { kind: "not_found", video_id: "aaaaaaaaaaa" },
-      { kind: "upstream_failed", video_id: "aaaaaaaaaaa", reason: "r" },
+      { kind: "upstream_failed", video_id: "aaaaaaaaaaa", cause: "bot_check", reason: "r" },
     ] satisfies LookupResult[]) {
       expect(renderPage(result).html).toContain('<form action="/videos"');
     }
